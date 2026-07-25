@@ -7,12 +7,12 @@ plugins {
 
 android {
     namespace = "com.haze.mobile"
-    compileSdk = 34
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "com.haze.mobile"
         minSdk = 26
-        targetSdk = 34
+        targetSdk = 35   // Play requires targeting a recent API for new apps/updates
         versionCode = 1
         versionName = "0.1.0"
     }

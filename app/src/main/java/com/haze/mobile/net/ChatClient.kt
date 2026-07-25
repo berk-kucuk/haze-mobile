@@ -6,6 +6,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -85,6 +86,7 @@ class ChatClient(
         )
         connected = true
         emit("connected")
+        startHeartbeat()
 
         // Read loop — decrypt every encrypted frame and surface the inner payload.
         while (connected) {
@@ -92,6 +94,22 @@ class ChatClient(
             if (frame["type"]?.jsonPrimitive?.content != "encrypted") continue
             val plain = crypto.decrypt(frame.str("nonce"), frame.str("ciphertext"))
             onEvent(decode(plain))
+        }
+    }
+
+    /**
+     * Periodic keepalive. Idle clients send no traffic, so the host's read
+     * timeout would eventually drop the connection and broadcast our `leave`
+     * (the user appears to "leave" after sitting quietly). A steady `ping`
+     * keeps the socket alive; the host answers with `pong` (ignored here).
+     */
+    private fun startHeartbeat() {
+        scope.launch {
+            while (connected) {
+                delay(PING_INTERVAL_MS)
+                if (!connected) break
+                runCatching { sendEncrypted(Protocol.ping(System.currentTimeMillis() / 1000.0)) }
+            }
         }
     }
 
@@ -180,5 +198,7 @@ class ChatClient(
 
     companion object {
         private const val CONNECT_TIMEOUT_MS = 120_000
+        /** Keepalive cadence — comfortably below the host's idle read timeout. */
+        private const val PING_INTERVAL_MS = 30_000L
     }
 }

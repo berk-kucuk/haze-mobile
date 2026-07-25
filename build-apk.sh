@@ -11,7 +11,8 @@
 #  Usage:
 #    ./build-apk.sh            build a debug APK into app/build/outputs/apk/debug/
 #    ./build-apk.sh --install  build, then `adb install` to a connected phone
-#    ./build-apk.sh --release  build an unsigned release APK
+#    ./build-apk.sh --release  build a release APK (signed if a keystore is set)
+#    ./build-apk.sh --bundle   build a release .aab (App Bundle) for the Play Store
 # =============================================================================
 set -euo pipefail
 
@@ -28,16 +29,25 @@ ok()   { echo -e "${GREEN}[✓]${RESET} $*"; }
 die()  { echo -e "${RED}[✗]${RESET} $*" >&2; exit 1; }
 
 DO_INSTALL=false
+IS_BUNDLE=false
 VARIANT="assembleDebug"
-APK_PATH="app/build/outputs/apk/debug/app-debug.apk"
+ARTIFACT="app/build/outputs/apk/debug/app-debug.apk"
 for arg in "$@"; do
   case "$arg" in
     --install) DO_INSTALL=true ;;
-    --release) VARIANT="assembleRelease"; APK_PATH="app/build/outputs/apk/release/app-release-unsigned.apk" ;;
-    -h|--help) sed -n '2,17p' "${BASH_SOURCE[0]}" | sed 's/^#\s\?//'; exit 0 ;;
+    --release) VARIANT="assembleRelease"; ARTIFACT="app/build/outputs/apk/release/app-release.apk" ;;
+    --bundle)  IS_BUNDLE=true; VARIANT="bundleRelease"; ARTIFACT="app/build/outputs/bundle/release/app-release.aab" ;;
+    -h|--help) sed -n '2,18p' "${BASH_SOURCE[0]}" | sed 's/^#\s\?//'; exit 0 ;;
     *) die "Unknown option: $arg" ;;
   esac
 done
+
+# A Play-uploadable .aab must be signed with your upload keystore. Warn early.
+if $IS_BUNDLE && [[ -z "${HAZE_KEYSTORE_FILE:-}" ]] \
+   && ! grep -q '^HAZE_KEYSTORE_FILE=' gradle.properties 2>/dev/null; then
+  info "No HAZE_KEYSTORE_FILE set — the .aab will be UNSIGNED and cannot be uploaded as-is."
+  info "Set the keystore properties (see the RELEASE notes in app/build.gradle.kts) to sign it."
+fi
 
 # ── JDK ───────────────────────────────────────────────────────────────────────
 command -v java >/dev/null 2>&1 || die "JDK not found. Install it:  sudo pacman -S jdk17-openjdk"
@@ -64,15 +74,18 @@ fi
 info "Building ($VARIANT) — first run downloads Gradle + dependencies, be patient…"
 ./gradlew "$VARIANT"
 
-[[ -f "$APK_PATH" ]] || die "Build finished but APK not found at $APK_PATH"
-ok "APK ready: $ROOT/$APK_PATH"
+[[ -f "$ARTIFACT" ]] || die "Build finished but artifact not found at $ARTIFACT"
+ok "Artifact ready: $ROOT/$ARTIFACT"
 
-if $DO_INSTALL; then
+if $IS_BUNDLE; then
+  echo "    Upload this .aab in the Play Console → your app → Production/Testing → Create release."
+  echo "    (Play re-signs installs from this bundle with the app-signing key.)"
+elif $DO_INSTALL; then
   command -v adb >/dev/null 2>&1 || die "adb not found. Install it:  sudo pacman -S android-tools"
   info "Installing to connected device via adb…"
-  adb install -r "$APK_PATH"
+  adb install -r "$ARTIFACT"
   ok "Installed. Launch 'Haze' on your phone (Orbot must be running)."
 else
-  echo "    Install to a USB-connected phone:  adb install -r \"$APK_PATH\""
+  echo "    Install to a USB-connected phone:  adb install -r \"$ARTIFACT\""
   echo "    Or copy the .apk to the phone and tap it (allow 'install unknown apps')."
 fi
