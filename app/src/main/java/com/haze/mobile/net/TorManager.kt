@@ -11,6 +11,7 @@ import io.matthewnelson.kmp.tor.runtime.TorRuntime
 import io.matthewnelson.kmp.tor.runtime.core.OnEvent
 import io.matthewnelson.kmp.tor.runtime.core.TorEvent
 import io.matthewnelson.kmp.tor.runtime.core.config.TorOption
+import io.matthewnelson.kmp.tor.runtime.core.config.TorSetting
 import io.matthewnelson.kmp.tor.runtime.core.ctrl.TorCmd
 import io.matthewnelson.kmp.tor.runtime.core.key.ED25519_V3
 import io.matthewnelson.kmp.tor.runtime.core.net.Port.Companion.toPort
@@ -26,6 +27,11 @@ import kotlinx.coroutines.withTimeout
  *
  * Call [init] once with an application Context, then [start] to boot Tor and
  * obtain the local SOCKS port. Bootstrap progress is reported via [onProgress].
+ *
+ * Where Tor itself is blocked, [init] takes a [TorBridges] mode and bridge lines
+ * and configures the daemon to reach the network through a bridge. The config is
+ * captured on the first [init] — the daemon is a singleton, so switching methods
+ * needs an app restart, which the settings screen says.
  */
 object TorManager {
 
@@ -46,9 +52,19 @@ object TorManager {
     @Volatile private var onProgress: ((Int) -> Unit)? = null
 
     @Synchronized
-    fun init(context: Context, onProgress: (Int) -> Unit) {
+    fun init(
+        context: Context,
+        bridgeMode: String = TorBridges.MODE_DIRECT,
+        bridgesCustom: String = "",
+        onProgress: (Int) -> Unit,
+    ) {
         this.onProgress = onProgress
         if (runtime != null) return
+
+        // Assembled before the daemon exists so a misconfigured bridge aborts
+        // startup. Falling back to a direct bootstrap would emit exactly the
+        // traffic the user picked a bridge to avoid.
+        val bridgeSettings = buildBridgeSettings(context, bridgeMode, bridgesCustom)
 
         val appDir = context.getDir("kmptor", Context.MODE_PRIVATE).absolutePath.toFile()
         val env = TorRuntime.Environment.Builder(
@@ -61,6 +77,7 @@ object TorManager {
             // Let Tor pick a free SOCKS port — safest on mobile.
             config {
                 TorOption.__SocksPort.configure { auto() }
+                bridgeSettings.forEach { put(it) }
             }
 
             // SOCKS listener opened → capture the port.
@@ -97,8 +114,42 @@ object TorManager {
     }
 
     /**
+     * Bridge-related settings for [bridgeMode], or an empty list for a direct
+     * connection. Starts the pluggable transport first when one is needed, so
+     * the `ClientTransportPlugin` line can name the port it actually opened.
+     *
+     * Throws [TorBridges.BridgeConfigError] rather than degrading to a direct
+     * connection.
+     */
+    private fun buildBridgeSettings(
+        context: Context,
+        bridgeMode: String,
+        bridgesCustom: String,
+    ): List<TorSetting> {
+        val mode = TorBridges.normalizeMode(bridgeMode)
+        if (!TorBridges.usesBridges(mode)) return emptyList()
+
+        val lines = TorBridges.validate(mode, bridgesCustom)
+        val settings = mutableListOf(TorConfigCompat.useBridges())
+
+        if (TorBridges.needsTransport(mode)) {
+            val transport = TorBridges.transportToken(mode)!!
+            val port = PluggableTransports.start(context, mode, lines)
+            settings += TorConfigCompat.clientTransportPlugin(transport, LOOPBACK, port)
+        }
+
+        lines.forEach { settings += TorConfigCompat.bridge(it) }
+        dlog("bridge mode=$mode with ${lines.size} bridge line(s)")
+        return settings
+    }
+
+    /**
      * Boot the Tor daemon (idempotent) and wait until it is bootstrapped and a
      * SOCKS port is available. Returns the local SOCKS port.
+     *
+     * Bootstrapping through a bridge — snowflake especially, which has to find a
+     * volunteer proxy first — is slower than a direct connection, so callers
+     * should pass a longer timeout for those (see [bootstrapTimeoutFor]).
      */
     suspend fun start(bootstrapTimeoutMs: Long = 120_000): Int {
         val rt = runtime ?: error("TorManager.init() not called")
@@ -125,15 +176,29 @@ object TorManager {
      * Publish a v3 onion hidden service that forwards its virtual chat port
      * (5222) to the local [localPort] where [ChatServer] is listening. Boots
      * Tor first if needed. Returns the ".onion" hostname to share with peers.
+     *
+     * When [httpPort] is non-null, virtual port 80 is additionally mapped to it
+     * so the same `.onion` address can be opened directly in Tor Browser (see
+     * [WebChatServer]) — the dual-port layout desktop always publishes. Left
+     * null unless the user enabled `SettingsStore.allowWebAccess`, so by
+     * default the service exposes only the native chat port.
      */
-    suspend fun startHiddenService(localPort: Int): String {
+    suspend fun startHiddenService(localPort: Int, httpPort: Int? = null): String {
         val rt = runtime ?: error("TorManager.init() not called")
         start() // ensure Tor is bootstrapped before adding the service
-        dlog("publishing hidden service → 127.0.0.1:$localPort")
+        dlog(
+            "publishing hidden service → 127.0.0.1:$localPort" +
+                if (httpPort != null) " (+ web :80 → 127.0.0.1:$httpPort)" else ""
+        )
         val entry = rt.executeAsync(
             TorCmd.Onion.Add.new(ED25519_V3) {
                 port(virtual = Protocol.CHAT_PORT.toPort()) {
                     target(port = localPort.toPort())
+                }
+                if (httpPort != null) {
+                    port(virtual = Protocol.WEB_PORT.toPort()) {
+                        target(port = httpPort.toPort())
+                    }
                 }
             }
         )
@@ -143,6 +208,10 @@ object TorManager {
     }
 
     fun isRunning(): Boolean = socksPort > 0
+
+    /** Bootstrap budget for a connection method: bridges need longer than direct. */
+    fun bootstrapTimeoutFor(bridgeMode: String?): Long =
+        if (TorBridges.usesBridges(bridgeMode)) 300_000 else 120_000
 
     private fun parseBootstrap(text: String): Int? {
         // e.g. "Bootstrapped 45% (requesting_descriptors): ..."

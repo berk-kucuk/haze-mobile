@@ -16,7 +16,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -58,6 +58,7 @@ import com.haze.mobile.ui.theme.HazeColors
 fun VaultScreen(
     state: ChatUiState,
     onExit: () -> Unit,
+    onUnlock: (String) -> Unit,
     onOpenSession: (VaultStore.Entry, String) -> Unit,
     onDeleteSession: (VaultStore.Entry) -> Unit,
     onCloseSession: () -> Unit,
@@ -67,7 +68,9 @@ fun VaultScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(HazeColors.Bg)
-            .windowInsetsPadding(WindowInsets.systemBars),
+            // safeDrawing rather than systemBars so a display cutout (incl. the
+            // landscape notch) is kept clear too.
+            .windowInsetsPadding(WindowInsets.safeDrawing),
     ) {
         val opened = state.vaultOpenMessages
 
@@ -95,11 +98,12 @@ fun VaultScreen(
             )
         }
 
-        if (opened != null) {
-            VaultChatView(opened)
-        } else {
-            VaultList(
+        when {
+            state.vaultLocked -> VaultLockGate(error = state.vaultLockError, onUnlock = onUnlock)
+            opened != null -> VaultChatView(opened)
+            else -> VaultList(
                 sessions = state.vaultSessions,
+                decoyMode = state.vaultDecoyMode,
                 error = state.vaultError,
                 onOpen = onOpenSession,
                 onDelete = onDeleteSession,
@@ -109,9 +113,61 @@ fun VaultScreen(
     }
 }
 
+/**
+ * Vault-lock password prompt — shown first whenever settings.vaultLockHash is
+ * set, before the session list. Matches desktop's _VaultPopup lock page
+ * (index 0 of its QStackedWidget). Entering the duress/decoy password instead
+ * of the real lock password is indistinguishable from here; ChatViewModel's
+ * unlockVault() decides which branch it was.
+ */
+@Composable
+private fun VaultLockGate(error: String?, onUnlock: (String) -> Unit) {
+    var pw by remember { mutableStateOf("") }
+    Column(
+        modifier = Modifier.fillMaxSize().padding(28.dp),
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Text("Vault is locked. Enter password:", color = HazeColors.Text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.height(14.dp))
+        OutlinedTextField(
+            value = pw,
+            onValueChange = { pw = it },
+            placeholder = { Text("Password", color = HazeColors.Text3) },
+            singleLine = true,
+            visualTransformation = PasswordVisualTransformation(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+            isError = error != null,
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(10.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedContainerColor = HazeColors.Surface2,
+                unfocusedContainerColor = HazeColors.Surface2,
+                focusedBorderColor = HazeColors.Border2,
+                unfocusedBorderColor = HazeColors.Border,
+                focusedTextColor = HazeColors.Text,
+                unfocusedTextColor = HazeColors.Text,
+                cursorColor = HazeColors.Accent,
+            ),
+        )
+        if (error != null) {
+            Spacer(Modifier.height(6.dp))
+            Text(error, color = HazeColors.Red, fontSize = 11.sp)
+        }
+        Spacer(Modifier.height(16.dp))
+        androidx.compose.material3.Button(
+            onClick = { onUnlock(pw) },
+            modifier = Modifier.fillMaxWidth().height(44.dp),
+            colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = HazeColors.Accent),
+        ) {
+            Text("Unlock", color = HazeColors.Bg, fontWeight = FontWeight.SemiBold)
+        }
+    }
+}
+
 @Composable
 private fun VaultList(
     sessions: List<VaultStore.Entry>,
+    decoyMode: Boolean,
     error: String?,
     onOpen: (VaultStore.Entry, String) -> Unit,
     onDelete: (VaultStore.Entry) -> Unit,
@@ -122,7 +178,8 @@ private fun VaultList(
     if (sessions.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(
-                "No saved chats.\nSave a conversation from the chat screen.",
+                if (decoyMode) "Decoy mode — vault appears empty."
+                else "No saved chats.\nSave a conversation from the chat screen.",
                 color = HazeColors.Text3, fontSize = 13.sp, textAlign = TextAlign.Center,
             )
         }
@@ -250,7 +307,7 @@ private fun VaultFileContent(msg: ChatMessage) {
                         .clickable {
                             if (playing) { runCatching { player.pause() }; playing = false }
                             else runCatching {
-                                val f = java.io.File(context.cacheDir, "vault_play_${msg.hashCode()}.m4a")
+                                val f = java.io.File(context.cacheDir, "vault_play_${msg.hashCode()}${audioExtensionForMime(msg.mime)}")
                                 if (!f.exists()) f.writeBytes(msg.fileData)
                                 player.reset(); player.setDataSource(f.absolutePath); player.prepare()
                                 player.setOnCompletionListener { playing = false }; player.start(); playing = true

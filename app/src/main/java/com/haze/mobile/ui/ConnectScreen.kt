@@ -14,7 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
@@ -25,6 +25,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.OutlinedTextField
@@ -56,9 +57,10 @@ fun ConnectScreen(
     onJoin: (onion: String, nick: String, password: String) -> Unit,
     onHost: (nick: String, password: String) -> Unit,
     onOpenVault: () -> Unit,
+    onOpenSettings: () -> Unit,
     onCancel: () -> Unit,
 ) {
-    var hostMode by rememberSaveable { mutableStateOf(false) }
+    var hostMode by rememberSaveable { mutableStateOf(true) }
     var onion by rememberSaveable { mutableStateOf("") }
     var nick by rememberSaveable { mutableStateOf("") }
     var password by rememberSaveable { mutableStateOf("") }
@@ -67,7 +69,10 @@ fun ConnectScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(HazeColors.Bg)
-            .windowInsetsPadding(WindowInsets.systemBars)
+            // safeDrawing = system bars + display cutout + IME, so the form
+            // stays clear of a notch in landscape and is pushed up by the
+            // keyboard instead of sitting behind it.
+            .windowInsetsPadding(WindowInsets.safeDrawing)
             .padding(horizontal = 24.dp),
         contentAlignment = Alignment.Center,
     ) {
@@ -124,14 +129,14 @@ fun ConnectScreen(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                ModeButton("JOIN", selected = !hostMode, modifier = Modifier.weight(1f)) { hostMode = false }
                 ModeButton("HOST", selected = hostMode, modifier = Modifier.weight(1f)) { hostMode = true }
+                ModeButton("JOIN", selected = !hostMode, modifier = Modifier.weight(1f)) { hostMode = false }
             }
 
-            if (!hostMode) {
-                HazeField(value = onion, onValueChange = { onion = it }, placeholder = "Onion address (….onion)")
-            }
             HazeField(value = nick, onValueChange = { nick = it }, placeholder = "Nickname")
+            if (!hostMode) {
+                HazeField(value = onion, onValueChange = { onion = it }, placeholder = "Session address")
+            }
             HazeField(
                 value = password,
                 onValueChange = { password = it },
@@ -169,7 +174,7 @@ fun ConnectScreen(
             Spacer(Modifier.height(2.dp))
 
             Text(
-                if (hostMode) "You'll get a .onion address to share. Built-in Tor — no setup."
+                if (hostMode) "You'll get a session address to share. Built-in Tor — no setup."
                 else "All communication is encrypted and anonymous.",
                 color = HazeColors.Text3,
                 fontSize = 10.sp,
@@ -199,6 +204,22 @@ fun ConnectScreen(
                     letterSpacing = 0.5.sp,
                 )
             }
+        }
+
+        // Settings gear — top-right corner
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .size(40.dp)
+                .clickable(onClick = onOpenSettings),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                Icons.Filled.Settings,
+                contentDescription = "settings",
+                tint = HazeColors.Text3,
+                modifier = Modifier.size(20.dp),
+            )
         }
     }
 }

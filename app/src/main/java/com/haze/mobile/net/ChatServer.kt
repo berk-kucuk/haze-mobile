@@ -68,9 +68,10 @@ class ChatServer(
 
     // ── Host-originated sends ────────────────────────────────────────────
 
-    fun sendChat(content: String): String {
+    fun sendChat(content: String, replyToNick: String? = null, replyToContent: String? = null,
+                 disappearSecs: Int = 0): String {
         val msgId = UUID.randomUUID().toString()
-        val payload = Protocol.chat(hostNick, content, msgId)
+        val payload = Protocol.chat(hostNick, content, msgId, replyToNick, replyToContent, disappearSecs)
         onEvent(payload)                 // local echo for the host UI
         scope.launch { broadcast(payload) }
         return msgId
@@ -78,6 +79,18 @@ class ChatServer(
 
     fun sendTyping(isTyping: Boolean) {
         scope.launch { broadcast(Protocol.typing(hostNick, isTyping)) }
+    }
+
+    fun sendDelete(msgId: String) {
+        val payload = Protocol.delete(hostNick, msgId)
+        onEvent(payload)
+        scope.launch { broadcast(payload) }
+    }
+
+    fun sendEdit(msgId: String, content: String) {
+        val payload = Protocol.edit(hostNick, msgId, content)
+        onEvent(payload)
+        scope.launch { broadcast(payload) }
     }
 
     fun sendPanic() {
@@ -123,6 +136,73 @@ class ChatServer(
         scope.cancel()
     }
 
+    // ── Web (Tor Browser) bridge ─────────────────────────────────────────
+    //
+    // Mirrors server.py's receive_web_chat / receive_web_typing. Browser
+    // clients don't run the X25519 handshake — WebChatServer terminates their
+    // plaintext-JSON WebSocket locally and feeds messages in through here, so
+    // to native TCP clients and the host UI they look like any other peer.
+
+    /** Nicks of the currently connected native TCP clients (host nick excluded). */
+    val clientNicks: Set<String> get() = clients.keys.toSet()
+
+    /** AES-GCM key browser clients share — see [SessionCrypto.webTrafficKey]. */
+    fun webTrafficKey(): ByteArray = crypto.webTrafficKey()
+
+    /** Accept a chat from a browser client: echo to the host UI, relay to TCP clients. */
+    suspend fun receiveWebChat(
+        nick: String,
+        content: String,
+        msgId: String,
+        replyToNick: String? = null,
+        replyToContent: String? = null,
+    ) {
+        val payload = Protocol.chat(nick, content, msgId, replyToNick, replyToContent)
+        onEvent(payload)
+        broadcast(payload)
+    }
+
+    /**
+     * Relay one file frame (start/chunk/end) from a browser client.
+     *
+     * The nick is stamped by the caller from the authenticated session, so a
+     * browser cannot attribute a transfer to someone else; size and chunk
+     * limits are applied there too.
+     */
+    suspend fun receiveWebFile(payload: JsonObject) {
+        onEvent(payload)
+        broadcast(payload)
+    }
+
+    /** Edit requested by a browser client, attributed to that client's nick. */
+    suspend fun receiveWebEdit(nick: String, msgId: String, content: String) {
+        val payload = Protocol.edit(nick, msgId, content)
+        onEvent(payload)
+        broadcast(payload)
+    }
+
+    /**
+     * Delete requested by a browser client, attributed to that client's nick.
+     *
+     * Separate from the host's own delete: a web guest removing its own message
+     * must not look to the room like the host did it.
+     */
+    suspend fun receiveWebDelete(nick: String, msgId: String) {
+        val payload = Protocol.delete(nick, msgId)
+        onEvent(payload)
+        broadcast(payload)
+    }
+
+    /** Accept a typing notice from a browser client. */
+    suspend fun receiveWebTyping(nick: String, isTyping: Boolean) {
+        val payload = Protocol.typing(nick, isTyping)
+        onEvent(payload)
+        broadcast(payload)
+    }
+
+    /** Relay a web-originated join/leave to native TCP clients. */
+    suspend fun relayToClients(payload: JsonObject) = broadcast(payload)
+
     // ── Client handling ──────────────────────────────────────────────────
 
     private suspend fun handleClient(socket: Socket) {
@@ -131,8 +211,15 @@ class ChatServer(
             val inp = socket.getInputStream()
             val out = socket.getOutputStream()
 
-            // Step 1: hello
+            // Step 1: hello — bounded the same way desktop's server.py bounds
+            // its initial recv_msg (asyncio.wait_for(..., timeout=30)): a
+            // connecting peer that never sends hello would otherwise tie up
+            // this accept loop's thread indefinitely. Only the handshake read
+            // gets this timeout; the main read loop below reverts to blocking
+            // (a live session has no such deadline).
+            socket.soTimeout = HELLO_TIMEOUT_MS
             val hello = decode(Framing.readMessage(inp))
+            socket.soTimeout = 0
             if (hello["type"]?.jsonPrimitive?.content != "hello") {
                 runCatching { socket.close() }; return
             }
@@ -174,7 +261,7 @@ class ChatServer(
                 if (frame["type"]?.jsonPrimitive?.content != "encrypted") continue
                 val inner = decode(crypto.decrypt(frame.str("nonce"), frame.str("ciphertext")))
                 when (inner["type"]?.jsonPrimitive?.content) {
-                    "chat", "typing", "file_start", "file_chunk", "file_end" -> {
+                    "chat", "typing", "delete", "edit", "file_start", "file_chunk", "file_end" -> {
                         val m = withNick(inner, n)
                         onEvent(m)
                         broadcast(m, exclude = n)
@@ -245,5 +332,10 @@ class ChatServer(
     private fun sanitizeNick(nick: String): String {
         val cleaned = nick.filter { it.isLetterOrDigit() || it == '_' || it == '-' }.take(20)
         return cleaned.ifEmpty { "anon" }
+    }
+
+    companion object {
+        /** Matches desktop server.py's asyncio.wait_for(recv_msg(reader), timeout=30) on the initial hello. */
+        private const val HELLO_TIMEOUT_MS = 30_000
     }
 }

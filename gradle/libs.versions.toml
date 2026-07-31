@@ -1,15 +1,20 @@
 [versions]
-agp = "8.5.2"
-kotlin = "2.2.21"
-coreKtx = "1.13.1"
-lifecycle = "2.8.6"
-activityCompose = "1.9.2"
-composeBom = "2024.09.03"
-coroutines = "1.8.1"
-serialization = "1.7.3"
+agp = "9.1.1"
+kotlin = "2.4.0"
+coreKtx = "1.19.0"
+lifecycle = "2.11.0"
+activityCompose = "1.13.0"
+composeBom = "2026.06.00"
+coroutines = "1.10.2"
+serialization = "1.9.0"
 bouncycastle = "1.78.1"
 kmptor = "2.6.0"
 kmptorResource = "409.5.0"
+iptproxy = "5.5.1"
+ktor = "3.4.0"
+androidxTestJunit = "1.2.1"
+androidxTestRunner = "1.6.2"
+androidxTestCore = "1.6.1"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -28,6 +33,22 @@ kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-
 bouncycastle = { group = "org.bouncycastle", name = "bcprov-jdk18on", version.ref = "bouncycastle" }
 kmptor-runtime = { group = "io.matthewnelson.kmp-tor", name = "runtime", version.ref = "kmptor" }
 kmptor-resource-exec = { group = "io.matthewnelson.kmp-tor", name = "resource-exec-tor", version.ref = "kmptorResource" }
+# Lyrebird (obfs4) + Snowflake pluggable transports, the same Go bundle Orbot
+# uses. Needed wherever Tor itself is blocked; see net/TorBridges.kt.
+iptproxy = { group = "com.netzarchitekten", name = "IPtProxy", version.ref = "iptproxy" }
+# Embedded HTTP + WebSocket server for the optional Tor Browser web UI
+# (host mode only, gated behind the allowWebAccess setting).
+ktor-server-core = { group = "io.ktor", name = "ktor-server-core", version.ref = "ktor" }
+ktor-server-cio = { group = "io.ktor", name = "ktor-server-cio", version.ref = "ktor" }
+ktor-server-websockets = { group = "io.ktor", name = "ktor-server-websockets", version.ref = "ktor" }
+# Test-only: drives the web bridge from an instrumented test (never shipped).
+ktor-client-cio = { group = "io.ktor", name = "ktor-client-cio", version.ref = "ktor" }
+ktor-client-websockets = { group = "io.ktor", name = "ktor-client-websockets", version.ref = "ktor" }
+androidx-test-junit = { group = "androidx.test.ext", name = "junit", version.ref = "androidxTestJunit" }
+# Plain JVM unit tests (no device needed) — used by net/TorBridgeConfigTest.kt.
+junit = { group = "junit", name = "junit", version = "4.13.2" }
+androidx-test-runner = { group = "androidx.test", name = "runner", version.ref = "androidxTestRunner" }
+androidx-test-core = { group = "androidx.test", name = "core", version.ref = "androidxTestCore" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

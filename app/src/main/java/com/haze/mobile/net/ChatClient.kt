@@ -98,10 +98,12 @@ class ChatClient(
     }
 
     /**
-     * Periodic keepalive. Idle clients send no traffic, so the host's read
-     * timeout would eventually drop the connection and broadcast our `leave`
-     * (the user appears to "leave" after sitting quietly). A steady `ping`
-     * keeps the socket alive; the host answers with `pong` (ignored here).
+     * Periodic keepalive. Idle clients send no traffic, and Tor reaps an
+     * onion-service circuit that's been sitting idle for a while — not any
+     * read timeout on the host's side, which (like desktop's server.py) only
+     * bounds the initial handshake read, not the ongoing per-client loop. A
+     * steady `ping` keeps the circuit alive; the host answers with `pong`,
+     * which ChatViewModel uses to surface round-trip latency in the UI.
      */
     private fun startHeartbeat() {
         scope.launch {
@@ -115,13 +117,18 @@ class ChatClient(
 
     // ── Sending ────────────────────────────────────────────────────────────
 
-    fun sendChat(content: String): String {
+    fun sendChat(content: String, replyToNick: String? = null, replyToContent: String? = null,
+                 disappearSecs: Int = 0): String {
         val msgId = UUID.randomUUID().toString()
-        enqueue(Protocol.chat(nick, content, msgId))
+        enqueue(Protocol.chat(nick, content, msgId, replyToNick, replyToContent, disappearSecs))
         return msgId
     }
 
     fun sendTyping(isTyping: Boolean) = enqueue(Protocol.typing(nick, isTyping))
+
+    fun sendDelete(msgId: String) = enqueue(Protocol.delete(nick, msgId))
+
+    fun sendEdit(msgId: String, content: String) = enqueue(Protocol.edit(nick, msgId, content))
 
     fun sendPanic() = enqueue(Protocol.panic(nick))
 

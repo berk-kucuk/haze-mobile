@@ -55,6 +55,18 @@ class SessionCrypto {
     }
 
     /**
+     * AES-GCM key shared by browser clients (mirrors `web_traffic_key`).
+     *
+     * Derived from the session key rather than being it: browsers have no
+     * ChaCha20-Poly1305, so their traffic uses a different cipher, and the same
+     * key bytes must not be handed to two of them.
+     */
+    fun webTrafficKey(): ByteArray {
+        val key = sessionKey ?: error("session key not established")
+        return WebE2E.deriveTrafficKey(key)
+    }
+
+    /**
      * Host side: wrap the shared session key for a connecting client, using a
      * key derived from ECDH(host_priv, client_pub). Returns (nonceB64, ctB64)
      * for the welcome frame (mirrors `wrap_session_key`).

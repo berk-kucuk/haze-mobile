@@ -16,15 +16,31 @@ import javax.crypto.spec.PBEKeySpec
  * Encrypted local vault — the Kotlin twin of Haze's `storage/vault.py`.
  *
  * Each saved chat is encrypted with its OWN password (there is no master vault
- * password). A key is derived via PBKDF2-HMAC-SHA256 over a per-device salt, and
- * the chat JSON is sealed with ChaCha20-Poly1305. Files are `<ts>_<name>.hzv`
- * (12-byte nonce ++ ciphertext). Loading with the wrong password throws.
+ * password). The chat JSON is sealed with ChaCha20-Poly1305.
+ *
+ * KEY DERIVATION: scrypt (memory-hard), replacing PBKDF2. PBKDF2 needs almost
+ * no memory, so a vault copied off a seized phone could be attacked on GPUs at
+ * enormous rates. scrypt at N=2^15 forces 32 MiB per password guess — the same
+ * parameters the desktop client uses.
+ *
+ * Files written before the migration are still readable: new files carry the
+ * "HZV2" prefix, anything without it is decrypted with the old PBKDF2 key and
+ * re-sealed with scrypt the next time that session is saved.
  */
 object VaultStore {
 
     data class Entry(val filename: String, val path: String, val displayName: String, val timestamp: String)
 
     private const val PBKDF2_ITERS = 210_000
+
+    /** Matches vault.py's _SCRYPT_N/_R/_P. */
+    private const val SCRYPT_N = 1 shl 15
+    private const val SCRYPT_R = 8
+    private const val SCRYPT_P = 1
+
+    /** Prefix marking a scrypt-sealed file; legacy files start at the nonce. */
+    private val MAGIC_V2 = "HZV2".toByteArray(Charsets.US_ASCII)
+
     private val random = SecureRandom()
 
     private fun vaultDir(context: Context): File =
@@ -38,7 +54,14 @@ object VaultStore {
         return salt
     }
 
-    private fun deriveKey(password: String, salt: ByteArray): ByteArray {
+    /** Current KDF: memory-hard scrypt (BouncyCastle, already a dependency). */
+    private fun deriveKey(password: String, salt: ByteArray): ByteArray =
+        org.bouncycastle.crypto.generators.SCrypt.generate(
+            password.toByteArray(Charsets.UTF_8), salt, SCRYPT_N, SCRYPT_R, SCRYPT_P, 32,
+        )
+
+    /** KDF for vault files written before the scrypt migration. Read-only. */
+    private fun deriveKeyLegacy(password: String, salt: ByteArray): ByteArray {
         val spec = PBEKeySpec(password.toCharArray(), salt, PBKDF2_ITERS, 256)
         val factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
         return factory.generateSecret(spec).encoded
@@ -63,7 +86,7 @@ object VaultStore {
                 .take(20).trim().ifEmpty { "session" }
             // Remove any prior copy of this exact session before writing the new one.
             vaultDir(context).listFiles { f -> f.name.startsWith("$safeId.") }?.forEach { it.delete() }
-            File(vaultDir(context), "$safeId.$safeName.hzv").writeBytes(nonce + ct)
+            File(vaultDir(context), "$safeId.$safeName.hzv").writeBytes(MAGIC_V2 + nonce + ct)
         } finally {
             key.fill(0)
         }
@@ -81,20 +104,40 @@ object VaultStore {
         }
     }
 
-    /** Decrypt a vault file with [password]. Throws if the password is wrong. */
+    /**
+     * Decrypt a vault file with [password]. Throws if the password is wrong.
+     *
+     * Reads both layouts: scrypt files carry the "HZV2" prefix, older PBKDF2
+     * files start straight into the nonce.
+     */
     fun loadSession(password: String, path: String): String {
         val f = File(path)
         val raw = f.readBytes()
         // Salt lives next to the vault files.
         val salt = File(f.parentFile, ".salt").readBytes()
-        val key = deriveKey(password, salt)
+
+        if (raw.size > MAGIC_V2.size && raw.copyOfRange(0, MAGIC_V2.size).contentEquals(MAGIC_V2)) {
+            val key = deriveKey(password, salt)
+            try {
+                val body = raw.copyOfRange(MAGIC_V2.size, raw.size)
+                return String(
+                    aead(false, key, body.copyOfRange(0, 12), body.copyOfRange(12, body.size)),
+                    Charsets.UTF_8,
+                )
+            } catch (e: Exception) {
+                // A legacy file whose random nonce happened to begin with the
+                // magic bytes lands here (1 in 2^32); fall through to legacy.
+            } finally {
+                key.fill(0)
+            }
+        }
+
+        val legacyKey = deriveKeyLegacy(password, salt)
         try {
-            val nonce = raw.copyOfRange(0, 12)
-            val ct = raw.copyOfRange(12, raw.size)
-            val plain = aead(false, key, nonce, ct)
+            val plain = aead(false, legacyKey, raw.copyOfRange(0, 12), raw.copyOfRange(12, raw.size))
             return String(plain, Charsets.UTF_8)
         } finally {
-            key.fill(0)
+            legacyKey.fill(0)
         }
     }
 

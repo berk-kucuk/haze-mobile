@@ -1,20 +1,64 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
 }
 
+kotlin {
+    compilerOptions {
+        jvmTarget = JvmTarget.JVM_17
+    }
+}
+
+// ── kmp-tor friend access ─────────────────────────────────────────────────────
+// net/TorConfigCompat.kt has to reach kmp-tor's internal TorSetting factories:
+// bridges (UseBridges / Bridge / ClientTransportPlugin) have no public config
+// API in kmp-tor 2.6.0 (upstream issue #626) and writing torrc directly is
+// unsupported. Kotlin's `internal` is per-module, and -Xfriend-paths is the
+// compiler's sanctioned way to widen it — so those calls stay compile-time
+// checked instead of becoming reflection that would fail silently at runtime.
+// A kmp-tor upgrade that reshapes those factories breaks the build, loudly,
+// which is the intent. Delete this once kmp-tor supports bridges natively.
+tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+    val compileClasspath = libraries
+    compilerOptions.freeCompilerArgs.add(
+        providers.provider {
+            val jar = compileClasspath.files.firstOrNull { it.name.startsWith("runtime-core-jvm") }
+                ?: throw GradleException(
+                    "kmp-tor runtime-core-jvm jar not found on the compile classpath — " +
+                        "net/TorConfigCompat.kt needs it as a -Xfriend-paths entry."
+                )
+            "-Xfriend-paths=${jar.absolutePath}"
+        }
+    )
+}
+
 android {
     namespace = "com.haze.mobile"
-    compileSdk = 35
+    compileSdk = 37
 
     defaultConfig {
-        applicationId = "com.haze.mobile"
+        // Play Store identity (permanent once published). Reverse-DNS of the
+        // project domain haze.berkkucukk.com.tr. The in-code package/namespace
+        // stays com.haze.mobile — applicationId need not match it.
+        applicationId = "tr.com.berkkucukk.haze"
         minSdk = 26
-        targetSdk = 35   // Play requires targeting a recent API for new apps/updates
-        versionCode = 1
-        versionName = "0.1.0"
+        targetSdk = 37   // Android 17; exceeds Play's API 36+ requirement (deadline 2026-08-31)
+        versionCode = 22
+        versionName = "1.1.0"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        ndk {
+            // Native payload is dominated by Go binaries: kmp-tor's tor plus
+            // IPtProxy's lyrebird/snowflake bundle (~24 MB per ABI). Dropping
+            // 32-bit x86 — emulator-only, no shipping device uses it — keeps the
+            // universal APK from carrying a fourth copy. ABI splits would trim
+            // more, but they rename the outputs that build-apk.sh looks for;
+            // Play Store installs already download one ABI from the .aab.
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
+        }
     }
 
     // Release signing — credentials read from gradle.properties (kept out of git).
@@ -51,9 +95,9 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
-    }
+    // AGP 9 removed android.kotlinOptions; JVM target is configured via the
+    // Kotlin Gradle plugin's compilerOptions DSL instead.
+
 
     buildFeatures {
         compose = true
@@ -89,4 +133,37 @@ dependencies {
     implementation(libs.bouncycastle)
     implementation(libs.kmptor.runtime)
     implementation(libs.kmptor.resource.exec)
+    implementation(libs.iptproxy)
+    implementation(libs.ktor.server.core)
+    implementation(libs.ktor.server.cio)
+    implementation(libs.ktor.server.websockets)
+
+    testImplementation(libs.junit)
+    androidTestImplementation(libs.androidx.test.junit)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.core)
+    androidTestImplementation(libs.ktor.client.cio)
+    androidTestImplementation(libs.ktor.client.websockets)
+    androidTestImplementation(libs.kotlinx.coroutines.android)
 }
+
+// Copy the signed release artifacts to stable names (haze.aab / haze.apk) under
+// app/build/outputs/haze/. AGP 9 dropped the old applicationVariants rename API,
+// so a copy step wired to the release tasks is the reliable way to fix the names.
+val hazeDist = layout.buildDirectory.dir("outputs/haze")
+
+val copyReleaseAab = tasks.register<Copy>("copyReleaseAab") {
+    from(layout.buildDirectory.dir("outputs/bundle/release")) { include("*.aab") }
+    into(hazeDist)
+    rename { "haze.aab" }
+}
+
+val copyReleaseApk = tasks.register<Copy>("copyReleaseApk") {
+    from(layout.buildDirectory.dir("outputs/apk/release")) { include("*.apk") }
+    into(hazeDist)
+    rename { "haze.apk" }
+}
+
+// AGP registers these variant tasks lazily, so match by name rather than named().
+tasks.matching { it.name == "bundleRelease" }.configureEach { finalizedBy(copyReleaseAab) }
+tasks.matching { it.name == "assembleRelease" }.configureEach { finalizedBy(copyReleaseApk) }

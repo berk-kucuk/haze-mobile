@@ -1,0 +1,281 @@
+HAZE MOBILE - v0.2.0 ÖZELLİKLER VE GELIŞTIRMELER
+================================================
+
+1. MESAJ YANITLAMA (Reply)
+   - Uzun basıp "Reply" seçeneğiyle başka bir mesaja yanıt ver
+   - Yanıt yazarken sarı kutuda "nick" ve mesaj içeriğinin kısa özeti göster
+   - Gönderilen mesajda yanıt verilen mesajın nick'i + içeriği yeşil çizgi ile göster
+   - Yanıt burada yalnızca görsel referans; arşivlemede tutulur
+
+2. MESAJ KÖPYALAMASı (Copy)
+   - Uzun basıp "Copy" seçeneğiyle mesaj metni panoya kopyala
+   - "Copied" göstergesi sisteme ait; mesaj içeriği özel olarak işaretli (EXTRA_IS_SENSITIVE)
+   - Başka uygulamalar mesajı okuyamaz, sadece "Copied" indicator'u görürler
+
+3. MESAJ SİLME (Decentralized)
+   - Uzun basıp "Delete" seçeneğiyle kendi mesajını sil (yalnızca gönderen silebilir)
+   - Silinen mesaj tüm cihazlarda "This message was deleted" placeholder'ı ile görünür
+   - Merkeziyetsiz P2P iletişim — silme event tüm peer'lara broadcast'lenir
+   - Best-effort: dürüst istemciler mesajı kaldırır, ama garantı yoktur
+
+4. AYARLAR SAYFASI (Settings)
+   - Ayrı bir "Settings" ekranı
+   - Seçilip görüntülenecek yeşil logo ikonu
+
+   Bölüm 1: PRIVACY (Gizlilik)
+   - Allow screenshots: Ekran görüntüsü ve kaydına izin ver (varsayılan: KAPALI)
+     * Kapalıyken FLAG_SECURE aktif; açıkken silinir
+     * Ayar değiştirilince anında uygulanır
+   - Blur messages: Mesajları bulanık göster (varsayılan: KAPALI)
+     * Açıkken her mesaj bulanık şekilde yüklenir
+     * Mesaja tap et → mesaj 5 saniye göz açık kalır, sonra tekrar bulanır
+     * Blur state LazyColumn recycling'de korunur (hoisted mutableStateMapOf)
+
+   Bölüm 2: CHAT (Sohbet)
+   - Send typing indicators: Yazı yazıyorum bildir (varsayılan: AÇIK)
+   - Show timestamps: Mesaj saatini göster (varsayılan: AÇIK)
+   - Enter to send: Enter tuşuyla gönder (varsayılan: AÇIK)
+
+   Bölüm 3: NOTIFICATIONS (Bildirimler)
+   - Persistent notification: Kalıcı bildirim göster (varsayılan: AÇIK)
+     * Ön plan servisi aracılığı ile arka planda bağlantı canlı tutulduğunu göster
+     * Minimal tasarım: Haze kalkan ikonu + "Haze Protocol" başlığı + durum
+   - Message notifications: Yeni mesaj bildirimini göster (varsayılan: AÇIK)
+     * Arka plandayken gelen mesajları heads-up bildirimle duy
+     * Bildirim HIGH priority (heads-up), kategori MESSAGE
+     * Tıkla → uygulama aç
+
+5. BALONCUK ARALıĞı DÜZELTME
+   - Kendi mesajlarım: "YOU" etiketini solda göster
+   - Baloncuk genişliği: Ekranın %68'i (değişken genişlik yerine sabit oran)
+   - Baloncuklar arasında eşit boşluk
+
+6. STİCKER VE GIF GÖNDERİMİ
+   - Klavyenin Commit Content API'sini kullan (Gboard, Giphy vb.)
+   - Native EditText (AndroidView) giriş alanı:
+     * Sistem keyboard GIF/sticker seçimini kabul et
+     * Seçilen dosya otomatik gönderilir
+     * Yazı yazma davranışı aynı (typing göstergesi, enter-to-send vb.)
+
+   - Gelen animasyonlu GIF/WebP:
+     * ImageDecoder ile API 28+ cihazlarda animasyonlu oynat
+     * Görünürken sonsuz döngüde oynar (REPEAT_INFINITE)
+     * Ekrandan kaydırınca durur (arka planda boşuna CPU/pil harcamaz)
+     * Tek emoji mesajları büyük (46sp) "sticker" gibi render'lan
+
+   - Emoji butonu: Yok (sistem keyboard'ta zaten var)
+
+7. ARKA PLAN BAĞLANTISI (Foreground Service)
+   - ConnectionService: Ön plan servisi
+   - Kullanıcı uygulamayı arka plana aldığında Tor bağlantısını açık tut
+   - Başlat: onStart() → onAppForeground() → servis başla
+   - Durdur: onStop() → onAppBackground() → servis durdur
+   - FGS tipi: FOREGROUND_SERVICE_DATA_SYNC (Android 14+)
+   - Bildirim: Kalıcı, minimal, OLED temasına uyar
+
+8. MESAJ BİLDİRİMLERİ (Message Notifications)
+   - Notifier sınıfı: Gelen mesajları heads-up bildirimle göster
+   - Kullanılan API: NotificationCompat.Builder, CATEGORY_MESSAGE
+   - Priority: HIGH (heads-up olsun)
+   - Göster: Gönderenin nick'i + mesaj önizlemesi
+   - Bildirim kaldır: Uygulama açıldığında onAppForeground() siler
+
+9. AÇIK TESTI HAZIRLIĞI (Play Console)
+   - versionCode: 3
+   - versionName: 0.2.0
+   - Release APK + AAB (app-release.aab) oluşturuldu
+   - İmzalama: Release keystore (haze-release.keystore)
+   - Ön plan hizmeti beyanı: Video + İngilizce gerekçe ile Google'a sunuldu
+
+10. GERI NAVIGASYON (Back Handler)
+    - ConnectScreen + addingSession: Geri tut → cancelAdd() (eklemeyi iptal et)
+    - SettingsScreen: Geri tut → exitSettings()
+    - VaultScreen: Geri tut → exitVault() ya da closeVaultSession()
+
+11. KONUM DEĞİŞTİRME (Host Varsayılan)
+    - Connect ekranında varsayılan olarak HOST modu seçili açılır
+    - Buton sırası: HOST (sol, seçili) → JOIN (sağ)
+
+12. HAZE WORDMARK GÖSTERILME
+    - Boş sohbette Haze logosu ("HAZE PROTOCOL" yazısı) arka planda görünür
+    - Gerçek mesaj gelince AnimatedVisibility ile fade-out (700ms)
+    - hasRealMessages kontrolü: sistem mesajları (join/leave) sayılmaz, yalnızca chat/file
+
+BUG DÜZELTMELERI
+=================
+
+• Blur State Recycling: LazyColumn scroll'unda mesajlar blur'larını kaybetme
+  → Çözüm: firstSeen/revealUntil map'lerini hoisted mutableStateMapOf'a taşı
+
+• Blur Kalitesi: Tam kolonya blur keskin kenar oluşturma
+  → Çözüm: Blur'ı tüm Box'a uygula, RoundedCornerShape kullan
+
+• Kopyalama Pop-up'ı: Sistem clipboard overlay çok büyük mesaj gösterme
+  → Çözüm: EXTRA_IS_SENSITIVE flag'i (Android 13+)
+
+• Reply Quote Bar: Seçili çizgi mesaj yüksekliğinden uzun kalma
+  → Çözüm: height(IntrinsicSize.Min) + fillMaxHeight()
+
+• Bildirim Genişletme: Kalıcı bildirim gölgede otomatik genişleme
+  → Çözüm: Büyük ikon + subtext kaldır, PRIORITY_LOW, tekil satır
+
+• Protocol Popup: Heksagon (⬡) karakteri ve yeşil dikdörtgen tasarımda kalma
+  → Çözüm: İkisini de kaldır
+
+KOD DEĞİŞİKLİKLERİ (Dosyalar)
+=============================
+
+• ChatScreen.kt
+  - MessageBubble: DeletedBubble + Delete menu (uzun bas)
+  - StickerBubble: Tek emoji mesajları büyük render et
+  - ReplyQuote: IntrinsicSize.Min + yeşil çizgi
+  - MessageList: Hoisted blur state (firstSeen/revealUntil)
+  - AnimatedVisibility: Wordmark fade-out
+  - InputBar: Native EditText (RichMessageField) + GIF/sticker support
+  - ImagePreview: mime parametresi + AnimatedImage (GIF/WebP)
+
+• SettingsStore.kt
+  - Settings data class: allowScreenshots, sendTypingIndicators, showTimestamps,
+    enterToSend, blurMessages, persistentNotification, messageNotifications
+
+• SettingsScreen.kt
+  - Ayarlar UI: 3 bölüm (Privacy, Chat, Notifications)
+  - Toggle'lar, değişiklik geri çağrıları
+
+• ChatViewModel.kt
+  - ChatMessage: deleted Boolean field
+  - deleteMessage(), handleDelete event
+  - updateSettings(), onAppForeground/Background()
+
+• Protocol.kt
+  - delete(nick, msgId) → {"type": "delete", ...}
+
+• ChatClient.kt
+  - sendDelete(msgId)
+
+• ChatServer.kt
+  - sendDelete(msgId), delete event relay
+
+• MainActivity.kt
+  - FLAG_SECURE toggle (LaunchedEffect)
+  - BackHandler'lar (Connect, Settings, Vault)
+  - onStart/onStop lifecycle (foreground service)
+
+• ConnectScreen.kt
+  - hostMode varsayılan: true
+  - Button sırası: HOST (solda) → JOIN (sağda)
+
+• ProtocolPopup.kt
+  - Hexagon + yeşil dikdörtgen kaldırıldı
+
+• ConnectionService.kt
+  - buildNotification(): Minimal (ikon + başlık + tek satır)
+  - setContentText() yerine (subText kaldırıldı)
+  - PRIORITY_LOW
+
+• Notifier.kt
+  - notifyMessage(), cancelAll()
+  - HIGH priority heads-up
+
+• build.gradle.kts
+  - versionCode: 3, versionName: 0.2.0
+
+TEKNIK NOTLAR
+==============
+
+• E2E Şifreleme: X25519 ECDH handshake + ChaCha20-Poly1305
+• Ağ: Tor üzerinden P2P iletişim (sunucu yok)
+• Persistence: SharedPreferences (Settings), vault dosyaları
+• Notification: OLED tema kullanılır, özel renk yok
+• Screenshot: FLAG_SECURE (varsayılan ON, Settings'te toggleylenebilir)
+• Screenshot kaydı sırasında: "Allow screenshots" ON yapıldıktan sonra normal GIF/video kaydı çalışır
+
+AÇIK TEST VE ÖTESİ
+==================
+
+• Play Console'da "Kapalı Test - Alpha" sürümü 0.2.0 (kod 3)
+• Ön plan hizmeti (FGS) beyanı: Video + İngilizce gerekçe yüklendi
+• Bildirilen izinler: POST_NOTIFICATIONS, CAMERA, RECORD_AUDIO
+• Desteklenen cihazlar: Telefon ~11K, Tablet ~6K, TV ~4 cihaz
+• Minimum SDK: 26 (Android 8.0)
+• Target SDK: 35 (Android 15)
+
+PLAY STORE YAYIN HAZIRLIĞI (GÜNCELLENDİ/YENİ)
+===============================================
+
+[YENİ] 13. PING KEEPALIVE (Idle Disconnect Fix)
+    - Sorun: Kullanıcı boşta kaldığında host idle timeout'u nedeniyle bağlantı kopuyor
+    - Çözüm: ChatClient.kt'ye startHeartbeat() eklendi
+    - PING_INTERVAL_MS = 30000 (30 saniye) → Protocol.ping() gönder
+    - Host pong() ile cevap verir (ViewModel yok sayar)
+    - Bağlantı ömrü boyunca çalışır, disconnect()/shutdown() ile temiz kapanır
+
+[GÜNCELLENDİ] 14. SDK YAYIN UYUMLULUĞU
+    - compileSdk: 34 → 35 (Android 15)
+    - targetSdk: 34 → 35
+    - Edge-to-edge layout: MainActivity zaten enableEdgeToEdge() kullanıyor
+    - Manifest targetSdkVersion otomatik güncellendi
+
+[YENİ] 15. APP BUNDLE (AAB) BUILD DESTEĞI
+    - build-apk.sh: --bundle seçeneği eklendi
+    - ./build-apk.sh --bundle → app/build/outputs/bundle/release/app-release.aab
+    - Signed with release keystore (gradle.properties credentials)
+    - Play Store için zorunlu format
+
+[GÜNCELLENDİ] 16. PAKET ADI (Package Identity)
+    - applicationId: com.haze.mobile → tr.com.berkkucukk.haze
+    - Reverse-DNS: haze.berkkucukk.com.tr sitenin tersi
+    - Play Store kimliği (permanent once published)
+    - FileProvider authority otomatik güncellendi
+    - Namespace (code package): com.haze.mobile kalıyor
+
+[GÜNCELLENDİ] 17. VERSION YÖNETIMI
+    - versionCode: 1 → 2 → 3 (Play Store çakışması önlemek)
+    - versionName: 0.1.0 → 0.1.0 → 0.2.0
+    - Dahili test (v1) → Kapalı test (v2, v3) progresyonu
+
+[YENİ] 18. GİZLİLİK POLİTİKASI
+    - Dosya: PRIVACY.md (bu repo'da)
+    - Web: https://haze.berkkucukk.com.tr/privacy.html (privacy.html yüklendi)
+    - İçerik: Veri toplanmıyor, E2E şifreleme, Tor kullanımı, izinler açıklaması
+    - Play Console gereksinim: Zorunlu
+
+[YENİ] 19. PLAY STORE YAYIN REHBERİ
+    - Dosya: PLAYSTORE.md
+    - İçerik: Teknik setup (targetSdk, AAB, keystore), Data Safety formu, Content Rating,
+              Permissions, UGC policy açıklaması, İnceleyici soruları
+    - Kapalı test: 12 kişi + 14 gün zorunlu
+    - Production: Tüm bölümleri doldurduktan sonra başvuru
+
+[YENİ] 20. PLAY CONSOLE KAPALI TEST BAŞLATILDI
+    - Kanal: Kapalı test - Alpha
+    - Sürüm: 0.2.0 (versionCode 3)
+    - Durum: İncelemede / Yayında (test kullanıcılarına açık)
+    - Test kullanıcıları: test-users listesi (e-posta yönetimi)
+    - Opt-in link: https://play.google.com/apps/testing/tr.com.berkkucukk.haze
+
+[GÜNCELLENDİ] 21. UYGULAMA İÇERİĞİ (App Content)
+    - Gizlilik politikası URL'si: https://haze.berkkucukk.com.tr/privacy.html [GÜNCELLENDİ]
+    - İçerik derecelendirme: Sosyal/İletişim kategorisi + anket dolduruldu [GÜNCELLENDİ]
+    - Veri güvenliği (Data Safety): "Veri toplanmıyor" seçeneği [GÜNCELLENDİ]
+    - Reklam kimliği: Hayır [GÜNCELLENDİ]
+    - Hedef yaş: 18+ [GÜNCELLENDİ]
+    - Oturum açma: Gerekmiyor (Tüm işlevler özel erişim olmadan) [GÜNCELLENDİ]
+    - Finans özellikleri: Yok [GÜNCELLENDİ]
+    - Sağlık uygulaması: Hayır [GÜNCELLENDİ]
+
+[YENİ] 22. MAĞAZA KAYDI (Store Listing)
+    - Uygulama adı: Haze [GÜNCELLENDİ]
+    - Kısa açıklama: "Anonymous encrypted group chat over Tor. No accounts, no logs, no trace." [GÜNCELLENDİ]
+    - Tam açıklama: Features + security stack detayı (4000 karakter) [GÜNCELLENDİ]
+    - Kategori: İletişim (Communication) [GÜNCELLENDİ]
+    - E-posta: dev.berkkucukk@gmail.com [GÜNCELLENDİ]
+    - Web sitesi: https://haze.berkkucukk.com.tr [GÜNCELLENDİ]
+    - Ekran görüntüleri: Telefon görselleri yüklendi [GÜNCELLENDİ]
+    - Feature graphic: 1024x500 (talep halinde)
+
+[YENİ] 23. RELEASE ARTIFACTS
+    - Signed APK: app/build/outputs/apk/release/app-release.apk (32 MB)
+    - Signed AAB: app/build/outputs/bundle/release/app-release.aab (33 MB)
+    - İmzalama: haze-release.keystore (gradle.properties)
+    - Build script: ./build-apk.sh --release / ./build-apk.sh --bundle

@@ -95,7 +95,7 @@ fun ProtocolPopup(
                 // ── Header ──
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        "⬡  HAZE PROTOCOL",
+                        "HAZE PROTOCOL",
                         color = Color.White,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.ExtraBold,
@@ -241,13 +241,6 @@ private fun CircuitDiagram() {
         val step = usable / (n - 1)
         val cy = h / 2 - 6.dp.toPx()
         val xs = FloatArray(n) { pad + it * step }
-
-        // Encrypted tunnel glow band
-        drawRect(
-            color = Green.copy(alpha = 0.04f),
-            topLeft = Offset(xs[0], cy - nh / 2 - 10.dp.toPx()),
-            size = Size(xs[n - 1] - xs[0], nh + 20.dp.toPx()),
-        )
 
         // Dotted connecting lines + chevrons
         val dash = PathEffect.dashPathEffect(floatArrayOf(6f, 6f), 0f)
